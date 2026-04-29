@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { sendMessage } from "@/lib/messaging";
 import type {
   AiProvider,
+  ExtractionOptions,
   ExtractionResult,
   ExtractionSource,
   HistoryEntry,
@@ -12,6 +13,7 @@ import {
   DEFAULT_CUSTOM_PROVIDER_NAME,
   DEFAULT_ENABLE_FILE_UPLOAD,
   DEFAULT_AI_PROVIDER,
+  DEFAULT_EXTRACTION_OPTIONS,
   DEFAULT_TEMPLATE,
   DEFAULT_AI_PROMPT,
   DEFAULT_AI_URL,
@@ -33,7 +35,12 @@ import {
   buildPromptWithContext,
   getPromptTemplateById,
 } from "@/lib/ai-prompts";
-import { buildDownloadFilename, getReadingStats } from "@/lib/popup-utils";
+import {
+  buildDownloadFilename,
+  cleanExtractedText,
+  type ManualCleanAction,
+  getReadingStats,
+} from "@/lib/popup-utils";
 import {
   FileText,
   Copy,
@@ -71,6 +78,7 @@ import {
   Globe,
   Cpu,
   FlaskConical,
+  Image as ImageIcon,
 } from "lucide-react";
 import "./App.css";
 
@@ -100,6 +108,43 @@ const AI_PROVIDER_OPTIONS: Array<{
   { id: "claude", label: "Claude", subtitle: "Anthropic Claude" },
   { id: "aistudio", label: "AI Studio", subtitle: "Google AI Studio" },
   { id: "custom", label: "Custom", subtitle: "Provider URL Kustom" },
+];
+
+const APP_ICON_SRC = "/icon.svg";
+
+const EXTRACTION_MODE_OPTIONS = [
+  {
+    id: "article",
+    label: "Article",
+    description: "Terbaik untuk artikel/blog",
+    icon: "book",
+  },
+  {
+    id: "clean",
+    label: "Clean Page",
+    description: "Terbaik untuk docs/halaman umum",
+    icon: "sparkles",
+  },
+  {
+    id: "raw",
+    label: "Raw",
+    description: "Fallback saat situs sulit dibaca",
+    icon: "code",
+  },
+] as const;
+
+const EXTRACTION_FEATURE_OPTIONS: Array<{
+  key: keyof Pick<
+    ExtractionOptions,
+    "includeImages" | "includeLinks" | "includeMetadata" | "removeDuplicates"
+  >;
+  label: string;
+  icon: "image" | "link" | "metadata" | "dedupe";
+}> = [
+  { key: "includeImages", label: "Sertakan gambar", icon: "image" },
+  { key: "includeLinks", label: "Pertahankan link", icon: "link" },
+  { key: "includeMetadata", label: "Sertakan metadata", icon: "metadata" },
+  { key: "removeDuplicates", label: "Hapus duplikat", icon: "dedupe" },
 ];
 
 function App() {
@@ -139,6 +184,9 @@ function App() {
   const [enableFileUpload, setEnableFileUpload] = useState(
     DEFAULT_ENABLE_FILE_UPLOAD,
   );
+  const [extractionOptions, setExtractionOptions] = useState<ExtractionOptions>(
+    DEFAULT_EXTRACTION_OPTIONS,
+  );
   const [selectedPromptTemplate, setSelectedPromptTemplate] =
     useState("summary_5_points");
   const [aiUrl, setAiUrl] = useState(DEFAULT_AI_URL);
@@ -171,6 +219,7 @@ function App() {
       aiProvider: AiProvider;
       customProviderName: string;
       enableFileUpload: boolean;
+      extractionOptions?: ExtractionOptions;
       selectedPromptTemplate: string;
       aiUrl: string;
     }>(LOCAL_DRAFT_KEY, {
@@ -179,6 +228,7 @@ function App() {
       aiProvider: DEFAULT_AI_PROVIDER,
       customProviderName: DEFAULT_CUSTOM_PROVIDER_NAME,
       enableFileUpload: DEFAULT_ENABLE_FILE_UPLOAD,
+      extractionOptions: DEFAULT_EXTRACTION_OPTIONS,
       selectedPromptTemplate: "summary_5_points",
       aiUrl: DEFAULT_AI_URL,
     });
@@ -193,6 +243,10 @@ function App() {
       draftSettings.customProviderName || DEFAULT_CUSTOM_PROVIDER_NAME,
     );
     setEnableFileUpload(draftSettings.enableFileUpload);
+    setExtractionOptions({
+      ...DEFAULT_EXTRACTION_OPTIONS,
+      ...draftSettings.extractionOptions,
+    });
     setSelectedPromptTemplate(draftSettings.selectedPromptTemplate);
     setAiUrl(draftSettings.aiUrl);
     setSavedPrompts(
@@ -345,6 +399,7 @@ function App() {
       aiProvider,
       customProviderName,
       enableFileUpload,
+      extractionOptions,
       selectedPromptTemplate,
       aiUrl,
     });
@@ -354,6 +409,7 @@ function App() {
     aiProvider,
     customProviderName,
     enableFileUpload,
+    extractionOptions,
     selectedPromptTemplate,
     aiUrl,
   ]);
@@ -610,6 +666,19 @@ function App() {
     return <List className="w-4 h-4" />;
   };
 
+  const renderExtractionModeIcon = (icon: string) => {
+    if (icon === "book") return <BookOpen className="w-4 h-4" />;
+    if (icon === "sparkles") return <Sparkles className="w-4 h-4" />;
+    return <FileCode className="w-4 h-4" />;
+  };
+
+  const renderFeatureIcon = (icon: string) => {
+    if (icon === "image") return <ImageIcon className="w-3.5 h-3.5" />;
+    if (icon === "link") return <Link2 className="w-3.5 h-3.5" />;
+    if (icon === "metadata") return <Database className="w-3.5 h-3.5" />;
+    return <Layers className="w-3.5 h-3.5" />;
+  };
+
   const renderProviderIcon = (provider: AiProvider) => {
     if (provider === "chatgpt")
       return <MessageSquare className="w-3.5 h-3.5" />;
@@ -649,6 +718,8 @@ function App() {
       excerpt: "",
       siteName: entry.siteName,
       url: entry.url,
+      analysis: entry.analysis,
+      metadata: entry.metadata,
     });
     setFormat(entry.format);
     setShowHistory(false);
@@ -726,7 +797,11 @@ function App() {
     action: "extractContent" | "extractSelection" | "startInspector",
   ) => {
     try {
-      return await sendMessage(action, customTemplate, { tabId });
+      return await sendMessage(
+        action,
+        { template: customTemplate, options: extractionOptions },
+        { tabId },
+      );
     } catch (err: any) {
       const msg = err.message || "";
       if (
@@ -739,7 +814,11 @@ function App() {
           files: ["content-scripts/content.js"],
         });
         await new Promise((r) => setTimeout(r, 600));
-        return await sendMessage(action, customTemplate, { tabId });
+        return await sendMessage(
+          action,
+          { template: customTemplate, options: extractionOptions },
+          { tabId },
+        );
       }
       throw err;
     }
@@ -840,6 +919,17 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
+  const handleManualClean = (action: ManualCleanAction) => {
+    setExtractedData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        content: cleanExtractedText(prev.content, action),
+        textContent: cleanExtractedText(prev.textContent, action),
+      };
+    });
+  };
+
   if (showSettings) {
     return (
       <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-all duration-300 w-full min-w-0">
@@ -851,7 +941,19 @@ function App() {
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
-            <h1 className="font-bold text-lg tracking-tight">Settings & AI</h1>
+            <img
+              src={APP_ICON_SRC}
+              alt=""
+              className="h-8 w-8 rounded-lg shadow-sm"
+            />
+            <div>
+              <h1 className="font-bold text-base leading-tight tracking-tight">
+                Settings & AI
+              </h1>
+              <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                Provider, prompt, dan kualitas ekstraksi
+              </p>
+            </div>
           </div>
         </header>
         <main className="flex-1 p-5 overflow-y-auto space-y-6">
@@ -1243,6 +1345,64 @@ function App() {
 
           <section className="bg-white/70 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+              <FileText className="w-4 h-4" />
+              <h2 className="text-xs font-bold uppercase tracking-wider">
+                Kualitas Ekstraksi
+              </h2>
+            </div>
+            <div className="grid grid-cols-3 gap-1 rounded-2xl bg-slate-100 dark:bg-slate-800 p-1">
+              {EXTRACTION_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() =>
+                    setExtractionOptions((prev) => ({
+                      ...prev,
+                      mode: option.id,
+                    }))
+                  }
+                  title={option.description}
+                  className={`px-2 py-2 rounded-xl text-[10px] font-bold ${
+                    extractionOptions.mode === option.id
+                      ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm"
+                      : "text-slate-500"
+                  }`}
+                >
+                  <span className="flex items-center justify-center gap-1.5">
+                    {renderExtractionModeIcon(option.icon)}
+                    {option.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {EXTRACTION_FEATURE_OPTIONS.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() =>
+                    setExtractionOptions((prev) => ({
+                      ...prev,
+                      [option.key]: !prev[option.key],
+                    }))
+                  }
+                  className={`rounded-xl border px-3 py-2 text-left text-[10px] font-bold transition-colors ${
+                    extractionOptions[option.key]
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
+                      : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800/60"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    {renderFeatureIcon(option.icon)}
+                    {option.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="bg-white/70 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
               <Database className="w-4 h-4" />
               <h2 className="text-xs font-bold uppercase tracking-wider">
                 Cache Ekstraksi
@@ -1294,16 +1454,23 @@ function App() {
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-all duration-300 w-full min-w-0">
       {/* Header */}
       <header className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-10 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Zap className="w-5 h-5 text-white fill-white" />
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
+            <img src={APP_ICON_SRC} alt="" className="h-8 w-8 rounded-lg" />
           </div>
-          <h1 className="font-bold text-lg tracking-tight">
-            SmartExtract{" "}
-            <span className="text-[10px] font-medium bg-blue-100 dark:bg-blue-900/40 text-blue-600 px-1.5 py-0.5 rounded ml-1">
-              v2.5
-            </span>
-          </h1>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <h1 className="truncate font-bold text-base leading-tight tracking-tight">
+                SmartExtract
+              </h1>
+              <span className="shrink-0 rounded-md bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                v2.4.1
+              </span>
+            </div>
+            <p className="truncate text-[10px] font-medium text-slate-500 dark:text-slate-400">
+              Clean web to Markdown, TXT, and AI
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
@@ -1344,9 +1511,12 @@ function App() {
       <main className="flex-1 p-4 sm:p-5 overflow-y-auto min-h-[420px]">
         {!extractedData && !loading && !error && (
           <div className="flex flex-col items-center justify-center h-[340px] text-center space-y-6 animate-in fade-in duration-700">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-900/30 rounded-3xl flex items-center justify-center shadow-inner relative">
-              <div className="absolute inset-0 bg-blue-400 blur-2xl opacity-10 animate-pulse rounded-full"></div>
-              <FileText className="w-10 h-10 text-blue-600 dark:text-blue-400 relative z-10" />
+            <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-white shadow-lg shadow-blue-600/10 ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+              <img
+                src={APP_ICON_SRC}
+                alt=""
+                className="h-16 w-16 rounded-2xl"
+              />
             </div>
             <div className="max-w-[240px]">
               <p className="font-bold text-slate-800 dark:text-slate-200 text-lg tracking-tight">
@@ -1356,6 +1526,45 @@ function App() {
                 Ambil artikel, pilihan teks, atau bagian halaman lalu kirim ke
                 AI favoritmu.
               </p>
+            </div>
+            <div className="grid w-full max-w-[320px] grid-cols-3 gap-2 text-[10px] font-bold text-slate-600 dark:text-slate-300">
+              <div className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-2 dark:border-slate-800 dark:bg-slate-900">
+                <FileCode className="h-3.5 w-3.5 text-blue-600" />
+                Markdown
+              </div>
+              <div className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-2 dark:border-slate-800 dark:bg-slate-900">
+                <Copy className="h-3.5 w-3.5 text-emerald-600" />
+                Clipboard
+              </div>
+              <div className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-2 dark:border-slate-800 dark:bg-slate-900">
+                <BrainCircuit className="h-3.5 w-3.5 text-indigo-600" />
+                AI Ready
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-1 w-full max-w-[320px] rounded-2xl bg-slate-100 dark:bg-slate-800 p-1">
+              {EXTRACTION_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() =>
+                    setExtractionOptions((prev) => ({
+                      ...prev,
+                      mode: option.id,
+                    }))
+                  }
+                  title={option.description}
+                  className={`px-2 py-2 rounded-xl text-[10px] font-bold ${
+                    extractionOptions.mode === option.id
+                      ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm"
+                      : "text-slate-500"
+                  }`}
+                >
+                  <span className="flex items-center justify-center gap-1.5">
+                    {renderExtractionModeIcon(option.icon)}
+                    {option.label}
+                  </span>
+                </button>
+              ))}
             </div>
             <div className="grid grid-cols-2 gap-3 w-full max-w-[320px]">
               <button
@@ -1416,14 +1625,16 @@ function App() {
         {showHistory && !loading && (
           <section className="space-y-3 animate-in fade-in duration-500">
             <div className="flex items-center justify-between">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              <h2 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                <History className="h-4 w-4" />
                 Extraction History
               </h2>
               <button
                 onClick={handleClearHistory}
                 disabled={history.length === 0}
-                className="text-[10px] font-bold text-red-500 disabled:text-slate-300 uppercase tracking-wider"
+                className="flex items-center gap-1 text-[10px] font-bold text-red-500 disabled:text-slate-300 uppercase tracking-wider"
               >
+                <Trash2 className="h-3.5 w-3.5" />
                 Clear All
               </button>
             </div>
@@ -1456,8 +1667,9 @@ function App() {
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => handleRestoreHistory(item)}
-                      className="px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-[10px] font-bold"
+                      className="flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700"
                     >
+                      <RotateCcw className="h-3 w-3" />
                       Pakai Lagi
                     </button>
                     <button
@@ -1524,6 +1736,32 @@ function App() {
                 <span>
                   {copied ? "Tersalin" : "Copy, download, atau kirim ke AI"}
                 </span>
+              </div>
+              <div className="mb-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleManualClean("links")}
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  Hapus Link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleManualClean("images")}
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  Hapus Gambar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleManualClean("blankLines")}
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  <List className="h-3.5 w-3.5" />
+                  Rapikan Spasi
+                </button>
               </div>
               <textarea
                 readOnly
