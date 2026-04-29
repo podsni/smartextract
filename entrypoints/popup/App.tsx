@@ -941,33 +941,48 @@ function App() {
               </p>
             </div>
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
                   <p className="text-[10px] font-bold text-slate-700 dark:text-slate-200">
                     Upload File ke AI
                   </p>
-                  <p className="text-[9px] text-slate-500 mt-1">
+                  <p className="text-[9px] text-slate-500 mt-1 leading-relaxed">
                     Jika aktif, hasil extract dikirim sebagai lampiran file
                     (ChatGPT & Gemini).
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setEnableFileUpload((prev) => !prev)}
-                  className={`relative h-6 w-11 rounded-full transition-colors ${
-                    enableFileUpload
-                      ? "bg-emerald-500"
-                      : "bg-slate-300 dark:bg-slate-600"
-                  }`}
-                  title="Toggle upload file"
-                  aria-pressed={enableFileUpload}
-                >
-                  <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                      enableFileUpload ? "translate-x-5" : "translate-x-0.5"
+                <div className="flex flex-col items-end gap-1 shrink-0 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setEnableFileUpload((prev) => !prev)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
+                      enableFileUpload
+                        ? "bg-emerald-500"
+                        : "bg-slate-300 dark:bg-slate-600"
                     }`}
-                  />
-                </button>
+                    title="Toggle upload file"
+                    role="switch"
+                    aria-checked={enableFileUpload}
+                    aria-pressed={enableFileUpload}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-1 ring-black/5 transition duration-200 ${
+                        enableFileUpload
+                          ? "translate-x-[22px]"
+                          : "translate-x-[2px]"
+                      }`}
+                    />
+                  </button>
+                  <span
+                    className={`text-[9px] font-bold uppercase tracking-wider ${
+                      enableFileUpload
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-slate-500 dark:text-slate-400"
+                    }`}
+                  >
+                    {enableFileUpload ? "On" : "Off"}
+                  </span>
+                </div>
               </div>
             </div>
             <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3 bg-white/70 dark:bg-slate-900/40">
