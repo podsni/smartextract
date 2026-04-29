@@ -33,6 +33,7 @@ import {
   buildPromptWithContext,
   getPromptTemplateById,
 } from "@/lib/ai-prompts";
+import { buildDownloadFilename, getReadingStats } from "@/lib/popup-utils";
 import {
   FileText,
   Copy,
@@ -620,12 +621,7 @@ function App() {
   };
 
   const stats = useMemo(() => {
-    if (!extractedData) return { words: 0, time: 0 };
-    const wordCount = extractedData.textContent.trim().split(/\s+/).length;
-    return {
-      words: wordCount,
-      time: Math.max(1, Math.ceil(wordCount / 200)),
-    };
+    return getReadingStats(extractedData?.textContent ?? "");
   }, [extractedData]);
 
   const persistExtraction = (
@@ -670,6 +666,11 @@ function App() {
   const handleClearHistory = () => {
     setHistory([]);
     saveHistoryToDb([]).catch(console.error);
+  };
+
+  const handleClearExtractionCache = () => {
+    setExtractionCache({});
+    setServedFromCache(false);
   };
 
   const handleAskAI = async () => {
@@ -834,14 +835,14 @@ function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${extractedData.title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.${format.toLowerCase()}`;
+    a.download = buildDownloadFilename(extractedData.title, format);
     a.click();
     URL.revokeObjectURL(url);
   };
 
   if (showSettings) {
     return (
-      <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-all duration-300 min-w-[420px]">
+      <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-all duration-300 w-full min-w-0">
         <header className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-10 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button
@@ -1239,6 +1240,32 @@ function App() {
               </div>
             </div>
           </section>
+
+          <section className="bg-white/70 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+              <Database className="w-4 h-4" />
+              <h2 className="text-xs font-bold uppercase tracking-wider">
+                Cache Ekstraksi
+              </h2>
+            </div>
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              Cache mempercepat ekstraksi ulang halaman yang sama. Hapus cache
+              jika konten situs sudah berubah.
+            </p>
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2">
+              <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                {Object.keys(extractionCache).length} halaman tersimpan
+              </span>
+              <button
+                type="button"
+                onClick={handleClearExtractionCache}
+                disabled={Object.keys(extractionCache).length === 0}
+                className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 disabled:bg-slate-100 disabled:text-slate-400 text-[10px] font-bold"
+              >
+                Hapus Cache
+              </button>
+            </div>
+          </section>
         </main>
         <footer className="p-5 border-t border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md flex justify-between gap-3">
           <button
@@ -1264,7 +1291,7 @@ function App() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-all duration-300 min-w-[420px]">
+    <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-all duration-300 w-full min-w-0">
       {/* Header */}
       <header className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-10 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -1314,7 +1341,7 @@ function App() {
       </header>
 
       {/* Content Area */}
-      <main className="flex-1 p-5 overflow-y-auto min-h-[440px]">
+      <main className="flex-1 p-4 sm:p-5 overflow-y-auto min-h-[420px]">
         {!extractedData && !loading && !error && (
           <div className="flex flex-col items-center justify-center h-[340px] text-center space-y-6 animate-in fade-in duration-700">
             <div className="w-20 h-20 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-900/30 rounded-3xl flex items-center justify-center shadow-inner relative">
@@ -1323,30 +1350,40 @@ function App() {
             </div>
             <div className="max-w-[240px]">
               <p className="font-bold text-slate-800 dark:text-slate-200 text-lg tracking-tight">
-                Instant Extraction
+                Ekstrak Konten Sekali Klik
               </p>
               <p className="text-sm text-slate-500 mt-2">
-                Professional tool to extract and process web content with AI.
+                Ambil artikel, pilihan teks, atau bagian halaman lalu kirim ke
+                AI favoritmu.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3 w-full max-w-[320px]">
               <button
                 onClick={handleFullExtract}
-                className="col-span-2 px-6 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-[0.98] flex items-center justify-center gap-2"
+                disabled={loading}
+                title="Ekstrak seluruh halaman"
+                aria-label="Ekstrak seluruh halaman aktif"
+                className="col-span-2 px-6 py-3.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white rounded-2xl text-sm font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-[0.98] flex items-center justify-center gap-2"
               >
-                <Zap className="w-4 h-4 fill-white" /> Full Page
+                <Zap className="w-4 h-4 fill-white" /> Ekstrak Halaman
               </button>
               <button
                 onClick={handleStartInspector}
-                className="px-4 py-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 rounded-2xl text-xs font-bold transition-all flex flex-col items-center gap-2 shadow-sm active:scale-[0.98]"
+                disabled={loading}
+                title="Pilih bagian halaman secara visual"
+                aria-label="Pilih bagian halaman secara visual"
+                className="px-4 py-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 hover:bg-indigo-100 disabled:bg-slate-100 text-indigo-700 dark:text-indigo-300 rounded-2xl text-xs font-bold transition-all flex flex-col items-center gap-2 shadow-sm active:scale-[0.98]"
               >
-                <MousePointer2 className="w-5 h-5" /> Picker
+                <MousePointer2 className="w-5 h-5" /> Pilih Bagian
               </button>
               <button
                 onClick={handleSelectionExtract}
-                className="px-4 py-3 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition-all flex flex-col items-center gap-2 shadow-sm active:scale-[0.98]"
+                disabled={loading}
+                title="Ekstrak teks yang sedang dipilih"
+                aria-label="Ekstrak teks yang sedang dipilih"
+                className="px-4 py-3 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 disabled:bg-slate-100 text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition-all flex flex-col items-center gap-2 shadow-sm active:scale-[0.98]"
               >
-                <Target className="w-5 h-5" /> Selection
+                <Target className="w-5 h-5" /> Teks Dipilih
               </button>
             </div>
           </div>
@@ -1480,16 +1517,24 @@ function App() {
 
             {/* Preview Box */}
             <div className="relative group">
+              <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-semibold text-slate-500">
+                <span>
+                  Preview {format === "MD" ? "Markdown" : "Plain Text"}
+                </span>
+                <span>
+                  {copied ? "Tersalin" : "Copy, download, atau kirim ke AI"}
+                </span>
+              </div>
               <textarea
                 readOnly
-                className="w-full h-80 bg-slate-100 dark:bg-slate-900/50 border-none rounded-3xl p-5 text-xs font-mono text-slate-700 dark:text-slate-300 focus:ring-2 focus:ring-blue-500/20 resize-none transition-all scrollbar-thin leading-relaxed"
+                className="w-full h-[min(20rem,42vh)] min-h-56 bg-slate-100 dark:bg-slate-900/50 border-none rounded-3xl p-5 text-xs font-mono text-slate-700 dark:text-slate-300 focus:ring-2 focus:ring-blue-500/20 resize-none transition-all scrollbar-thin leading-relaxed"
                 value={
                   format === "MD"
                     ? extractedData.content
                     : extractedData.textContent
                 }
               />
-              <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
+              <div className="absolute top-10 right-4 flex flex-col gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-300 sm:translate-x-2 sm:group-hover:translate-x-0">
                 <button
                   onClick={handleAskAI}
                   className="p-3 bg-indigo-600 text-white shadow-xl rounded-2xl hover:bg-indigo-700 transition-all active:scale-90"

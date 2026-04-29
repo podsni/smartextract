@@ -6,6 +6,14 @@ import DOMPurify from "dompurify";
 import type { ExtractionResult } from "./types";
 import { DEFAULT_TEMPLATE } from "./types";
 
+const sanitizeHtml = (html: string): string => {
+  if (typeof DOMPurify.sanitize === "function") {
+    return DOMPurify.sanitize(html);
+  }
+
+  return html;
+};
+
 /**
  * Replaces variables in the template string with actual data.
  */
@@ -47,7 +55,7 @@ export async function extractPageContent(
 
   if (isSelection && doc instanceof HTMLElement) {
     title = `Selection from ${siteName}`;
-    cleanHtml = DOMPurify.sanitize(doc.innerHTML);
+    cleanHtml = sanitizeHtml(doc.innerHTML);
     textContent = doc.innerText;
   } else {
     const clone = (doc as Document).cloneNode(true) as Document;
@@ -59,14 +67,25 @@ export async function extractPageContent(
     const reader = new Readability(clone, { keepClasses: false });
     const article = reader.parse();
 
-    if (!article) return null;
+    if (article) {
+      title = article.title || "";
+      cleanHtml = sanitizeHtml(article.content || "");
+      textContent = article.textContent || "";
+      siteName = article.siteName || siteName;
+      byline = article.byline || "";
+      excerpt = article.excerpt || "";
+    } else {
+      const fallbackRoot =
+        clone.querySelector("main") ??
+        clone.querySelector("article") ??
+        clone.body ??
+        clone.documentElement;
+      title = clone.title || siteName;
+      cleanHtml = sanitizeHtml(fallbackRoot.innerHTML || "");
+      textContent = fallbackRoot.textContent || "";
+    }
 
-    title = article.title || "";
-    cleanHtml = DOMPurify.sanitize(article.content || "");
-    textContent = article.textContent || "";
-    siteName = article.siteName || siteName;
-    byline = article.byline || "";
-    excerpt = article.excerpt || "";
+    if (!textContent.trim()) return null;
   }
 
   const turndownService = new TurndownService({

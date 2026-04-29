@@ -11,14 +11,20 @@
 }
 
 body {
-  width: 400px;
-  min-height: 500px;
+  width: min(460px, 100vw);
+  min-width: 360px;
+  min-height: 520px;
+  max-height: 680px;
   margin: 0;
   font-family:
     Inter,
     system-ui,
     -apple-system,
     sans-serif;
+}
+
+#root {
+  min-height: 520px;
 }
 
 /* Custom scrollbar for better look */
