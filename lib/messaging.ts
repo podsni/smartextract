@@ -1,10 +1,15 @@
 import { defineExtensionMessaging } from "@webext-core/messaging";
-import type { ExtractionResult } from "./types";
+import type { ExtractionOptions, ExtractionResult } from "./types";
+
+export interface ExtractRequest {
+  template?: string;
+  options?: Partial<ExtractionOptions>;
+}
 
 export interface MessagingSchema {
-  extractContent(template?: string): ExtractionResult | null;
-  extractSelection(template?: string): ExtractionResult | null;
-  startInspector(template?: string): void;
+  extractContent(request?: ExtractRequest): ExtractionResult | null;
+  extractSelection(request?: ExtractRequest): ExtractionResult | null;
+  startInspector(request?: ExtractRequest): void;
 }
 
 export const { sendMessage, onMessage } =

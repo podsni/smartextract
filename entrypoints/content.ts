@@ -54,18 +54,19 @@ export default defineContentScript({
     };
 
     // Full Page Extraction
-    onMessage("extractContent", async (template) => {
+    onMessage("extractContent", async (request) => {
       if (ctx.isInvalid) return null;
       return await extractPageContent(
         document,
         window.location.href,
         false,
-        template?.data,
+        request?.data?.template,
+        request?.data?.options,
       );
     });
 
     // Selection Extraction
-    onMessage("extractSelection", async (template) => {
+    onMessage("extractSelection", async (request) => {
       if (ctx.isInvalid) return null;
       const selection = window.getSelection();
       if (
@@ -81,12 +82,13 @@ export default defineContentScript({
         container,
         window.location.href,
         true,
-        template?.data,
+        request?.data?.template,
+        request?.data?.options,
       );
     });
 
     // Visual Inspector
-    onMessage("startInspector", (template) => {
+    onMessage("startInspector", (request) => {
       if (ctx.isInvalid) return;
 
       let lastElement: HTMLElement | null = null;
@@ -112,7 +114,8 @@ export default defineContentScript({
             target,
             window.location.href,
             true,
-            template?.data,
+            request?.data?.template,
+            request?.data?.options,
           );
           if (result) {
             await navigator.clipboard.writeText(result.content);

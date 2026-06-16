@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { buildDownloadFilename, getReadingStats } from "./popup-utils";
+import {
+  buildDownloadFilename,
+  cleanExtractedText,
+  getReadingStats,
+} from "./popup-utils";
 
 describe("popup utils", () => {
   it("builds safe markdown filenames", () => {
@@ -21,5 +25,17 @@ describe("popup utils", () => {
 
   it("returns zero stats for empty content", () => {
     expect(getReadingStats("   ")).toEqual({ words: 0, time: 0 });
+  });
+
+  it("removes markdown links when requested", () => {
+    expect(
+      cleanExtractedText("Read [Docs](https://example.com)", "links"),
+    ).toBe("Read Docs");
+  });
+
+  it("removes markdown images when requested", () => {
+    expect(cleanExtractedText("![Logo](logo.png)\nText", "images")).toBe(
+      "Text",
+    );
   });
 });

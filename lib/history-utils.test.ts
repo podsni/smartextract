@@ -30,6 +30,35 @@ describe("history-utils", () => {
     expect(entry.createdAt).toBeGreaterThan(0);
   });
 
+  it("preserves analysis and metadata in history entries", () => {
+    const extraction: ExtractionResult = {
+      ...baseExtraction,
+      metadata: {
+        title: "Test Title",
+        description: "Description",
+        author: "Author",
+        publishedTime: "2026-04-29",
+        canonicalUrl: "https://example.com/article",
+        siteName: "Example",
+      },
+      analysis: {
+        score: 42,
+        level: "poor",
+        issues: ["Konten terlalu pendek"],
+        recommendations: ["Coba mode Raw"],
+        linkCount: 1,
+        imageCount: 2,
+        duplicateBlockCount: 3,
+        noiseCount: 4,
+      },
+    };
+
+    const entry = createHistoryEntry(extraction, "full", "MD");
+
+    expect(entry.analysis).toEqual(extraction.analysis);
+    expect(entry.metadata).toEqual(extraction.metadata);
+  });
+
   it("keeps newest first and enforces max history size", () => {
     const existing = Array.from({ length: 3 }).map((_, idx) =>
       createHistoryEntry(

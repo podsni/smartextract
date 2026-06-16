@@ -3,7 +3,14 @@ import TurndownService from "turndown";
 // @ts-ignore - plugin-gfm might not have types in some environments
 import { gfm } from "turndown-plugin-gfm";
 import DOMPurify from "dompurify";
-import type { ExtractionResult } from "./types";
+import {
+  cleanDocumentForExtraction,
+  removeDuplicateTextBlocks,
+} from "./content-cleaner";
+import { analyzeExtractionQuality } from "./extraction-analysis";
+import { normalizeExtractionOptions } from "./extraction-options";
+import { extractPageMetadata } from "./metadata";
+import type { ExtractionOptions, ExtractionResult } from "./types";
 import { DEFAULT_TEMPLATE } from "./types";
 
 const sanitizeHtml = (html: string): string => {
@@ -12,6 +19,10 @@ const sanitizeHtml = (html: string): string => {
   }
 
   return html;
+};
+
+const isDocumentNode = (value: Document | HTMLElement): value is Document => {
+  return value.nodeType === 9;
 };
 
 /**
@@ -45,7 +56,12 @@ export async function extractPageContent(
   url: string,
   isSelection: boolean = false,
   customTemplate?: string,
+  options?: Partial<ExtractionOptions>,
 ): Promise<ExtractionResult | null> {
+  const extractionOptions = normalizeExtractionOptions(options);
+  const metadata = isDocumentNode(doc)
+    ? extractPageMetadata(doc, url)
+    : undefined;
   let title = "";
   let textContent = "";
   let cleanHtml = "";
@@ -53,19 +69,20 @@ export async function extractPageContent(
   let byline = "";
   let excerpt = "";
 
-  if (isSelection && doc instanceof HTMLElement) {
+  if (isSelection && !isDocumentNode(doc)) {
     title = `Selection from ${siteName}`;
     cleanHtml = sanitizeHtml(doc.innerHTML);
     textContent = doc.innerText;
   } else {
     const clone = (doc as Document).cloneNode(true) as Document;
-    const unwanted = clone.querySelectorAll(
-      "nav, footer, .ads, .social-share, .comments, script, style",
-    );
-    unwanted.forEach((el) => el.remove());
+    if (extractionOptions.mode !== "raw") {
+      cleanDocumentForExtraction(clone);
+    }
 
-    const reader = new Readability(clone, { keepClasses: false });
-    const article = reader.parse();
+    const article =
+      extractionOptions.mode === "article"
+        ? new Readability(clone, { keepClasses: false }).parse()
+        : null;
 
     if (article) {
       title = article.title || "";
@@ -101,10 +118,26 @@ export async function extractPageContent(
     // Fallback
   }
 
+  if (!extractionOptions.includeImages) {
+    turndownService.addRule("drop-images", {
+      filter: "img",
+      replacement: () => "",
+    });
+  }
+
+  if (!extractionOptions.includeLinks) {
+    turndownService.addRule("plain-links", {
+      filter: "a",
+      replacement: (content) => content,
+    });
+  }
+
   turndownService.addRule("absolute-links", {
     filter: (node) => {
       const tag = node.nodeName.toLowerCase();
-      return tag === "a" || tag === "img";
+      if (tag === "a") return extractionOptions.includeLinks;
+      if (tag === "img") return extractionOptions.includeImages;
+      return false;
     },
     replacement: (content, node) => {
       const el = node as HTMLElement;
@@ -138,6 +171,12 @@ export async function extractPageContent(
   const markdownBody = turndownService
     .turndown(cleanHtml)
     .replace(/\n{3,}/g, "\n\n");
+  const cleanedMarkdownBody = extractionOptions.removeDuplicates
+    ? removeDuplicateTextBlocks(markdownBody)
+    : markdownBody;
+  const cleanedText = extractionOptions.removeDuplicates
+    ? removeDuplicateTextBlocks(textContent)
+    : textContent;
   const dateStr = new Date().toLocaleString();
   const author = byline || "Unknown Author";
 
@@ -147,22 +186,28 @@ export async function extractPageContent(
     url,
     date: dateStr,
     siteName,
-    content: markdownBody,
+    content: cleanedMarkdownBody,
   };
 
   // Logic:
   // 1. If Selection: Just content (cleanest).
   // 2. If Full Page: Use custom template OR default template.
   const finalMd = isSelection
-    ? markdownBody
+    ? cleanedMarkdownBody
     : applyTemplate(customTemplate || DEFAULT_TEMPLATE, templateData);
 
   const finalTxt = isSelection
-    ? textContent.replace(/\n{3,}/g, "\n\n").trim()
+    ? cleanedText.replace(/\n{3,}/g, "\n\n").trim()
     : applyTemplate(customTemplate || DEFAULT_TEMPLATE, {
         ...templateData,
-        content: textContent,
+        content: cleanedText,
       });
+
+  const analysis = analyzeExtractionQuality({
+    content: finalMd,
+    textContent: finalTxt,
+    metadata: extractionOptions.includeMetadata ? metadata : undefined,
+  });
 
   return {
     title,
@@ -174,5 +219,7 @@ export async function extractPageContent(
     excerpt,
     siteName,
     url,
+    metadata: extractionOptions.includeMetadata ? metadata : undefined,
+    analysis,
   };
 }

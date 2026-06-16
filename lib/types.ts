@@ -1,3 +1,25 @@
+export interface ExtractionMetadata {
+  title: string;
+  description: string;
+  author: string;
+  publishedTime: string;
+  canonicalUrl: string;
+  siteName: string;
+}
+
+export type ExtractionQualityLevel = "good" | "medium" | "poor";
+
+export interface ExtractionAnalysis {
+  score: number;
+  level: ExtractionQualityLevel;
+  issues: string[];
+  recommendations: string[];
+  linkCount: number;
+  imageCount: number;
+  duplicateBlockCount: number;
+  noiseCount: number;
+}
+
 export interface ExtractionResult {
   title: string;
   byline: string;
@@ -8,6 +30,8 @@ export interface ExtractionResult {
   excerpt: string;
   siteName: string;
   url: string;
+  metadata?: ExtractionMetadata;
+  analysis?: ExtractionAnalysis;
 }
 
 export interface ExtractorMessage {
@@ -39,6 +63,15 @@ export interface PendingAIUpload {
 
 export type ExtractionSource = "full" | "selection" | "picker";
 export type OutputFormat = "MD" | "TXT";
+export type ExtractionMode = "article" | "clean" | "raw";
+
+export interface ExtractionOptions {
+  mode: ExtractionMode;
+  includeImages: boolean;
+  includeLinks: boolean;
+  includeMetadata: boolean;
+  removeDuplicates: boolean;
+}
 
 export interface HistoryEntry {
   id: string;
@@ -50,6 +83,8 @@ export interface HistoryEntry {
   format: OutputFormat;
   content: string;
   textContent: string;
+  analysis?: ExtractionAnalysis;
+  metadata?: ExtractionMetadata;
 }
 
 export const DEFAULT_TEMPLATE = `================================================================================
@@ -69,6 +104,13 @@ export const DEFAULT_AI_PROMPT =
   "Tolong ringkas teks berikut dalam 5 poin utama yang sangat jelas dan mudah dipahami:";
 export const DEFAULT_AI_PROVIDER: AiProvider = "chatgpt";
 export const DEFAULT_ENABLE_FILE_UPLOAD = true;
+export const DEFAULT_EXTRACTION_OPTIONS: ExtractionOptions = {
+  mode: "article",
+  includeImages: true,
+  includeLinks: true,
+  includeMetadata: true,
+  removeDuplicates: true,
+};
 export const DEFAULT_CUSTOM_PROVIDER_NAME = "Custom Provider";
 export const DEFAULT_AI_URL = "https://chatgpt.com/";
 export const AI_PROVIDER_URLS: Record<AiProvider, string> = {

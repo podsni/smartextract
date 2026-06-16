@@ -21,6 +21,8 @@ export function createHistoryEntry(
     format,
     content: data.content,
     textContent: data.textContent,
+    analysis: data.analysis,
+    metadata: data.metadata,
   };
 }
 

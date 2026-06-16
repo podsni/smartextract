@@ -21,3 +21,18 @@ export function buildDownloadFilename(
 
   return `${base || "smart_extract"}.${format.toLowerCase()}`;
 }
+
+export type ManualCleanAction = "links" | "images" | "blankLines";
+
+export function cleanExtractedText(
+  content: string,
+  action: ManualCleanAction,
+): string {
+  if (action === "links") {
+    return content.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+  }
+  if (action === "images") {
+    return content.replace(/!\[[^\]]*\]\([^)]+\)\n?/g, "").trim();
+  }
+  return content.replace(/\n{3,}/g, "\n\n").trim();
+}
