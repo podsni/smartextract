@@ -1,5 +1,9 @@
 import { defineExtensionMessaging } from "@webext-core/messaging";
-import type { ExtractionOptions, ExtractionResult } from "./types";
+import type {
+  ExtractionMode,
+  ExtractionOptions,
+  ExtractionResult,
+} from "./types";
 
 export interface ExtractRequest {
   template?: string;
@@ -10,6 +14,7 @@ export type ContextMenuType = "full" | "selection" | "element";
 
 export interface ContextMenuExtractRequest {
   type: ContextMenuType;
+  mode: ExtractionMode;
   template?: string;
   options?: Partial<ExtractionOptions>;
 }

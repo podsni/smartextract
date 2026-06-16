@@ -165,7 +165,10 @@ export default defineContentScript({
     // Context Menu Extraction — called by background, returns ExtractionResult
     onMessage("contextMenuExtract", async (request) => {
       if (ctx.isInvalid) return null;
-      const { type, template, options } = request.data;
+      const { type, mode, template, options } = request.data;
+
+      // mode from menu overrides options.mode
+      const mergedOptions = { ...options, mode };
 
       if (type === "selection") {
         const selection = window.getSelection();
@@ -177,7 +180,7 @@ export default defineContentScript({
           window.location.href,
           true,
           template,
-          options,
+          mergedOptions,
         );
       }
 
@@ -188,17 +191,17 @@ export default defineContentScript({
           window.location.href,
           true,
           template,
-          options,
+          mergedOptions,
         );
       }
 
-      // Default: full page
+      // full page
       return await extractPageContent(
         document,
         window.location.href,
         false,
         template,
-        options,
+        mergedOptions,
       );
     });
 

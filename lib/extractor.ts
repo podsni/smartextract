@@ -104,9 +104,11 @@ function cleanMarkdown(md: string): string {
       // Remove empty links []() or [](#...)
       .replace(/\[([^\]]*)\]\(#[^)]*\)/g, "$1")
       .replace(/\[\]\([^)]+\)/g, "")
-      // Remove zero-width / non-printable characters
       // eslint-disable-next-line no-control-regex
-      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F​‌‍﻿]/g, "")
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+      // Remove zero-width / invisible Unicode chars (ZWSP, ZWNJ, ZWJ, BOM)
+      // eslint-disable-next-line no-misleading-character-class
+      .replace(/[​‌‍﻿]/g, "")
       // Fix double-escaped backslashes from turndown
       .replace(/\\([*_`[\]()#>|~])/g, "$1")
       // Remove lines that are ONLY punctuation / single chars (turndown artifacts)
