@@ -174,6 +174,9 @@ export default defineBackground(() => {
         tabId,
       );
 
+      // Also copy to clipboard via content script (background can't access clipboard in MV3)
+      await sendMessage("triggerCopy", content, tabId);
+
       const shortTitle =
         result.title.length > 35
           ? result.title.substring(0, 35) + "…"

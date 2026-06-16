@@ -209,6 +209,17 @@ export default defineContentScript({
       downloadFile(filename, content, mimeType);
     });
 
+    // Copy trigger — background can't access clipboard in MV3, so we do it here
+    onMessage("triggerCopy", async (request) => {
+      if (ctx.isInvalid) return false;
+      try {
+        await navigator.clipboard.writeText(request.data as string);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
     // Toast trigger from background script
     onMessage("showToast", (request) => {
       if (ctx.isInvalid) return;

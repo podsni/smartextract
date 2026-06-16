@@ -87,16 +87,21 @@ export interface HistoryEntry {
   metadata?: ExtractionMetadata;
 }
 
-export const DEFAULT_TEMPLATE = `================================================================================
-TITLE   : {{title}}
-AUTHOR  : {{author}}
-SOURCE  : {{url}}
-DATE    : {{date}}
-================================================================================
+export const DEFAULT_TEMPLATE = `---
+title: "{{title}}"
+author: "{{author}}"
+source: "{{url}}"
+site: "{{site}}"
+published: "{{published}}"
+saved: "{{date}}"
+---
 
 # {{title}}
 
-Source: [{{url}}]({{url}})
+> **Source:** [{{url}}]({{url}})
+> **Author:** {{author}} · **Published:** {{published}}
+
+---
 
 {{content}}`;
 

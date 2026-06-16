@@ -28,6 +28,7 @@ export interface MessagingSchema {
     request: ContextMenuExtractRequest,
   ): ExtractionResult | null;
   triggerDownload(request: DownloadRequest): void;
+  triggerCopy(content: string): boolean;
   showToast(message: string): void;
 }
 

@@ -15,9 +15,60 @@ import { DEFAULT_TEMPLATE } from "./types";
 
 const sanitizeHtml = (html: string): string => {
   if (typeof DOMPurify.sanitize === "function") {
-    return DOMPurify.sanitize(html);
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [
+        "p",
+        "br",
+        "b",
+        "i",
+        "strong",
+        "em",
+        "a",
+        "img",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ul",
+        "ol",
+        "li",
+        "blockquote",
+        "pre",
+        "code",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "figure",
+        "figcaption",
+        "picture",
+        "source",
+        "hr",
+        "s",
+        "del",
+        "sup",
+        "sub",
+        "mark",
+      ],
+      ALLOWED_ATTR: [
+        "href",
+        "src",
+        "alt",
+        "title",
+        "data-src",
+        "data-srcset",
+        "srcset",
+        "class",
+        "id",
+        "cite",
+      ],
+      ALLOW_DATA_ATTR: false,
+    });
   }
-
   return html;
 };
 
@@ -26,7 +77,49 @@ const isDocumentNode = (value: Document | HTMLElement): value is Document => {
 };
 
 /**
- * Replaces variables in the template string with actual data.
+ * Resolve lazy-loaded image src: try data-src, data-srcset, srcset before src.
+ */
+function resolveImgSrc(el: HTMLElement, baseUrl: string): string | null {
+  const raw =
+    el.getAttribute("data-src") ||
+    el.getAttribute("data-srcset")?.split(",")[0]?.trim().split(" ")[0] ||
+    el.getAttribute("srcset")?.split(",")[0]?.trim().split(" ")[0] ||
+    el.getAttribute("src");
+  if (!raw || raw.startsWith("data:")) return null;
+  try {
+    return new URL(raw, baseUrl).href;
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Post-process markdown to clean up common turndown artifacts.
+ */
+function cleanMarkdown(md: string): string {
+  return (
+    md
+      // Collapse 3+ blank lines → 2
+      .replace(/\n{3,}/g, "\n\n")
+      // Remove empty links []() or [](#...)
+      .replace(/\[([^\]]*)\]\(#[^)]*\)/g, "$1")
+      .replace(/\[\]\([^)]+\)/g, "")
+      // Remove zero-width / non-printable characters
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F​‌‍﻿]/g, "")
+      // Fix double-escaped backslashes from turndown
+      .replace(/\\([*_`[\]()#>|~])/g, "$1")
+      // Remove lines that are ONLY punctuation / single chars (turndown artifacts)
+      .replace(/^[|\\-]{1,3}$/gm, "")
+      // Trim trailing whitespace per line
+      .replace(/[ \t]+$/gm, "")
+      .trim()
+  );
+}
+
+/**
+ * Replaces template variables with actual data.
+ * Variables: {{title}}, {{author}}, {{url}}, {{date}}, {{published}}, {{site}}, {{content}}
  */
 function applyTemplate(
   template: string,
@@ -35,6 +128,7 @@ function applyTemplate(
     author: string;
     url: string;
     date: string;
+    published: string;
     siteName: string;
     content: string;
   },
@@ -44,12 +138,116 @@ function applyTemplate(
     .replace(/{{author}}/g, data.author)
     .replace(/{{url}}/g, data.url)
     .replace(/{{date}}/g, data.date)
+    .replace(/{{published}}/g, data.published)
     .replace(/{{site}}/g, data.siteName)
     .replace(/{{content}}/g, data.content);
 }
 
 /**
- * Core extraction function optimized for universal web compatibility.
+ * Build TurndownService with full rule set for clean GFM output.
+ */
+function buildTurndown(
+  url: string,
+  includeImages: boolean,
+  includeLinks: boolean,
+): TurndownService {
+  const td = new TurndownService({
+    headingStyle: "atx",
+    codeBlockStyle: "fenced",
+    bulletListMarker: "-",
+    hr: "---",
+  });
+
+  try {
+    td.use(gfm);
+  } catch {
+    // fallback if gfm plugin fails
+  }
+
+  // figure → extract img + figcaption
+  td.addRule("figure", {
+    filter: "figure",
+    replacement: (_content, node) => {
+      if (!includeImages) return "";
+      const el = node as HTMLElement;
+      const img = el.querySelector("img");
+      const caption = el.querySelector("figcaption")?.textContent?.trim() ?? "";
+      if (!img) return caption ? `\n\n_${caption}_\n\n` : "";
+      const src = resolveImgSrc(img as HTMLElement, url);
+      if (!src) return caption ? `\n\n_${caption}_\n\n` : "";
+      const alt = img.getAttribute("alt")?.trim() || caption;
+      return caption
+        ? `\n\n![${alt}](${src})\n_${caption}_\n\n`
+        : `\n\n![${alt}](${src})\n\n`;
+    },
+  });
+
+  // blockquote — keep clean, trim attribution lines
+  td.addRule("blockquote", {
+    filter: "blockquote",
+    replacement: (content) => {
+      const trimmed = content.trim();
+      if (!trimmed) return "";
+      return (
+        "\n\n" +
+        trimmed
+          .split("\n")
+          .map((line) => `> ${line}`)
+          .join("\n") +
+        "\n\n"
+      );
+    },
+  });
+
+  // Drop images entirely when disabled
+  if (!includeImages) {
+    td.addRule("drop-images", {
+      filter: ["img", "picture", "source"],
+      replacement: () => "",
+    });
+  } else {
+    // Resolve lazy-loaded images
+    td.addRule("lazy-img", {
+      filter: "img",
+      replacement: (_content, node) => {
+        const el = node as HTMLElement;
+        const src = resolveImgSrc(el, url);
+        if (!src) return "";
+        const alt = el.getAttribute("alt")?.trim() ?? "";
+        return `![${alt}](${src})`;
+      },
+    });
+  }
+
+  // Links — plain text when disabled, absolute href when enabled
+  if (!includeLinks) {
+    td.addRule("plain-links", {
+      filter: "a",
+      replacement: (content) => content,
+    });
+  } else {
+    td.addRule("absolute-links", {
+      filter: "a",
+      replacement: (content, node) => {
+        const el = node as HTMLElement;
+        const href = el.getAttribute("href");
+        if (!href || href.startsWith("#") || href.startsWith("javascript:")) {
+          return content;
+        }
+        try {
+          return `[${content}](${new URL(href, url).href})`;
+        } catch {
+          return `[${content}](${href})`;
+        }
+      },
+    });
+  }
+
+  return td;
+}
+
+/**
+ * Core extraction function — handles full page, selection, and element modes.
  */
 export async function extractPageContent(
   doc: Document | HTMLElement,
@@ -58,146 +256,109 @@ export async function extractPageContent(
   customTemplate?: string,
   options?: Partial<ExtractionOptions>,
 ): Promise<ExtractionResult | null> {
-  const extractionOptions = normalizeExtractionOptions(options);
+  const opts = normalizeExtractionOptions(options);
   const metadata = isDocumentNode(doc)
     ? extractPageMetadata(doc, url)
     : undefined;
+
   let title = "";
   let textContent = "";
   let cleanHtml = "";
-  let siteName = new URL(url).hostname;
+  let siteName = (() => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  })();
   let byline = "";
   let excerpt = "";
+  let publishedTime = metadata?.publishedTime ?? "";
 
   if (isSelection && !isDocumentNode(doc)) {
+    // Selection or element pick — just sanitize and convert
     title = `Selection from ${siteName}`;
-    cleanHtml = sanitizeHtml(doc.innerHTML);
-    textContent = doc.innerText;
+    cleanHtml = sanitizeHtml((doc as HTMLElement).innerHTML);
+    textContent = (doc as HTMLElement).innerText ?? doc.textContent ?? "";
   } else {
     const clone = (doc as Document).cloneNode(true) as Document;
-    if (extractionOptions.mode !== "raw") {
+
+    if (opts.mode !== "raw") {
       cleanDocumentForExtraction(clone);
     }
 
     const article =
-      extractionOptions.mode === "article"
-        ? new Readability(clone, { keepClasses: false }).parse()
+      opts.mode === "article"
+        ? (() => {
+            try {
+              return new Readability(clone, {
+                keepClasses: false,
+                charThreshold: 20,
+              }).parse();
+            } catch {
+              return null;
+            }
+          })()
         : null;
 
     if (article) {
-      title = article.title || "";
+      title = article.title?.trim() || "";
       cleanHtml = sanitizeHtml(article.content || "");
       textContent = article.textContent || "";
-      siteName = article.siteName || siteName;
-      byline = article.byline || "";
-      excerpt = article.excerpt || "";
+      siteName = article.siteName?.trim() || siteName;
+      byline = article.byline?.trim() || "";
+      excerpt = article.excerpt?.trim() || "";
+      publishedTime = publishedTime || "";
     } else {
-      const fallbackRoot =
+      // Fallback: prefer <main> / <article> over full <body>
+      const fallback =
         clone.querySelector("main") ??
+        clone.querySelector('[role="main"]') ??
         clone.querySelector("article") ??
         clone.body ??
         clone.documentElement;
-      title = clone.title || siteName;
-      cleanHtml = sanitizeHtml(fallbackRoot.innerHTML || "");
-      textContent = fallbackRoot.textContent || "";
+      title = clone.title?.trim() || siteName;
+      cleanHtml = sanitizeHtml((fallback as HTMLElement).innerHTML || "");
+      textContent = fallback.textContent || "";
     }
 
     if (!textContent.trim()) return null;
   }
 
-  const turndownService = new TurndownService({
-    headingStyle: "atx",
-    codeBlockStyle: "fenced",
-    bulletListMarker: "-",
-    hr: "---",
-  });
+  const td = buildTurndown(url, opts.includeImages, opts.includeLinks);
+  const rawMarkdown = td.turndown(cleanHtml);
+  const markdownBody = cleanMarkdown(rawMarkdown);
 
-  try {
-    turndownService.use(gfm);
-  } catch {
-    // Fallback
-  }
-
-  if (!extractionOptions.includeImages) {
-    turndownService.addRule("drop-images", {
-      filter: "img",
-      replacement: () => "",
-    });
-  }
-
-  if (!extractionOptions.includeLinks) {
-    turndownService.addRule("plain-links", {
-      filter: "a",
-      replacement: (content) => content,
-    });
-  }
-
-  turndownService.addRule("absolute-links", {
-    filter: (node) => {
-      const tag = node.nodeName.toLowerCase();
-      if (tag === "a") return extractionOptions.includeLinks;
-      if (tag === "img") return extractionOptions.includeImages;
-      return false;
-    },
-    replacement: (content, node) => {
-      const el = node as HTMLElement;
-      if (el.nodeName === "A") {
-        const href = el.getAttribute("href");
-        if (href) {
-          try {
-            const absoluteHref = new URL(href, url).href;
-            return `[${content}](${absoluteHref})`;
-          } catch {
-            return `[${content}](${href})`;
-          }
-        }
-      }
-      if (el.nodeName === "IMG") {
-        const src = el.getAttribute("src") || el.getAttribute("data-src");
-        const alt = el.getAttribute("alt") || "";
-        if (src) {
-          try {
-            const absoluteSrc = new URL(src, url).href;
-            return `![${alt}](${absoluteSrc})`;
-          } catch {
-            return `![${alt}](${src})`;
-          }
-        }
-      }
-      return content;
-    },
-  });
-
-  const markdownBody = turndownService
-    .turndown(cleanHtml)
-    .replace(/\n{3,}/g, "\n\n");
-  const cleanedMarkdownBody = extractionOptions.removeDuplicates
+  const cleanedMarkdownBody = opts.removeDuplicates
     ? removeDuplicateTextBlocks(markdownBody)
     : markdownBody;
-  const cleanedText = extractionOptions.removeDuplicates
-    ? removeDuplicateTextBlocks(textContent)
-    : textContent;
-  const dateStr = new Date().toLocaleString();
-  const author = byline || "Unknown Author";
+
+  const cleanedText = opts.removeDuplicates
+    ? removeDuplicateTextBlocks(textContent.replace(/\n{3,}/g, "\n\n").trim())
+    : textContent.replace(/\n{3,}/g, "\n\n").trim();
+
+  const dateStr = new Date().toLocaleString("id-ID", {
+    dateStyle: "long",
+    timeStyle: "short",
+  });
+  const author = byline || metadata?.author || "Unknown Author";
 
   const templateData = {
     title,
     author,
     url,
     date: dateStr,
+    published: publishedTime || dateStr,
     siteName,
     content: cleanedMarkdownBody,
   };
 
-  // Logic:
-  // 1. If Selection: Just content (cleanest).
-  // 2. If Full Page: Use custom template OR default template.
   const finalMd = isSelection
     ? cleanedMarkdownBody
     : applyTemplate(customTemplate || DEFAULT_TEMPLATE, templateData);
 
   const finalTxt = isSelection
-    ? cleanedText.replace(/\n{3,}/g, "\n\n").trim()
+    ? cleanedText
     : applyTemplate(customTemplate || DEFAULT_TEMPLATE, {
         ...templateData,
         content: cleanedText,
@@ -206,7 +367,7 @@ export async function extractPageContent(
   const analysis = analyzeExtractionQuality({
     content: finalMd,
     textContent: finalTxt,
-    metadata: extractionOptions.includeMetadata ? metadata : undefined,
+    metadata: opts.includeMetadata ? metadata : undefined,
   });
 
   return {
@@ -219,7 +380,7 @@ export async function extractPageContent(
     excerpt,
     siteName,
     url,
-    metadata: extractionOptions.includeMetadata ? metadata : undefined,
+    metadata: opts.includeMetadata ? metadata : undefined,
     analysis,
   };
 }
