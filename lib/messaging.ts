@@ -14,6 +14,12 @@ export interface ContextMenuExtractRequest {
   options?: Partial<ExtractionOptions>;
 }
 
+export interface DownloadRequest {
+  filename: string;
+  content: string;
+  mimeType: string;
+}
+
 export interface MessagingSchema {
   extractContent(request?: ExtractRequest): ExtractionResult | null;
   extractSelection(request?: ExtractRequest): ExtractionResult | null;
@@ -21,6 +27,7 @@ export interface MessagingSchema {
   contextMenuExtract(
     request: ContextMenuExtractRequest,
   ): ExtractionResult | null;
+  triggerDownload(request: DownloadRequest): void;
   showToast(message: string): void;
 }
 
