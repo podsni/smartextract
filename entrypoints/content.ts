@@ -7,6 +7,9 @@ export default defineContentScript({
     const HIGHLIGHT_CLASS = "smart-extract-pro-highlight";
     const TOAST_ID = "smart-extract-toast";
 
+    // Track the element the user last right-clicked for "Extract This Element"
+    let lastRightClickTarget: HTMLElement | null = null;
+
     const style = document.createElement("style");
     style.textContent = `
       .${HIGHLIGHT_CLASS} {
@@ -35,25 +38,55 @@ export default defineContentScript({
         gap: 10px;
         transform: translateY(100px);
         transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        max-width: 360px;
       }
       #${TOAST_ID}.show { transform: translateY(0); }
-      #${TOAST_ID} .icon { color: #10b981; font-weight: bold; }
+      #${TOAST_ID}.toast-success .icon { color: #10b981; }
+      #${TOAST_ID}.toast-error .icon { color: #ef4444; }
+      #${TOAST_ID}.toast-warning .icon { color: #f59e0b; }
+      #${TOAST_ID}.toast-loading .icon { color: #60a5fa; }
     `;
     document.head.appendChild(style);
 
-    const showToast = (message: string) => {
+    // Track right-clicked element for "Extract This Element" menu item
+    document.addEventListener(
+      "contextmenu",
+      (e) => {
+        lastRightClickTarget = e.target as HTMLElement;
+      },
+      true,
+    );
+
+    const showToast = (
+      message: string,
+      type: "success" | "error" | "warning" | "loading" = "success",
+      duration = 3000,
+    ) => {
       let toast = document.getElementById(TOAST_ID);
       if (!toast) {
         toast = document.createElement("div");
         toast.id = TOAST_ID;
         document.body.appendChild(toast);
       }
-      toast.innerHTML = `<span class="icon">✓</span> ${message}`;
+
+      // Pick icon based on type
+      const icons = {
+        success: "✓",
+        error: "✕",
+        warning: "⚠",
+        loading: "⏳",
+      };
+
+      toast.className = `toast-${type}`;
+      toast.innerHTML = `<span class="icon">${icons[type]}</span><span>${message}</span>`;
       toast.classList.add("show");
-      setTimeout(() => toast?.classList.remove("show"), 3000);
+
+      if (duration > 0) {
+        setTimeout(() => toast?.classList.remove("show"), duration);
+      }
     };
 
-    // Full Page Extraction
+    // Full Page Extraction (from popup)
     onMessage("extractContent", async (request) => {
       if (ctx.isInvalid) return null;
       return await extractPageContent(
@@ -65,7 +98,7 @@ export default defineContentScript({
       );
     });
 
-    // Selection Extraction
+    // Selection Extraction (from popup)
     onMessage("extractSelection", async (request) => {
       if (ctx.isInvalid) return null;
       const selection = window.getSelection();
@@ -87,7 +120,61 @@ export default defineContentScript({
       );
     });
 
-    // Visual Inspector
+    // Context Menu Extraction (from background script)
+    onMessage("contextMenuExtract", async (request) => {
+      if (ctx.isInvalid) return null;
+      const { type, template, options } = request.data;
+
+      if (type === "selection") {
+        const selection = window.getSelection();
+        if (!selection || selection.toString().trim() === "") return null;
+        const container = document.createElement("div");
+        container.appendChild(selection.getRangeAt(0).cloneContents());
+        return await extractPageContent(
+          container,
+          window.location.href,
+          true,
+          template,
+          options,
+        );
+      }
+
+      if (type === "element" && lastRightClickTarget) {
+        return await extractPageContent(
+          lastRightClickTarget,
+          window.location.href,
+          true,
+          template,
+          options,
+        );
+      }
+
+      // Default: full page
+      return await extractPageContent(
+        document,
+        window.location.href,
+        false,
+        template,
+        options,
+      );
+    });
+
+    // Toast trigger from background script
+    onMessage("showToast", (request) => {
+      if (ctx.isInvalid) return;
+      const msg = request.data as string;
+
+      // Detect toast type from message prefix
+      let type: "success" | "error" | "warning" | "loading" = "success";
+      if (msg.startsWith("❌")) type = "error";
+      else if (msg.startsWith("⚠️")) type = "warning";
+      else if (msg.startsWith("⏳")) type = "loading";
+
+      const duration = type === "loading" ? 0 : type === "error" ? 4000 : 3000;
+      showToast(msg, type, duration);
+    });
+
+    // Visual Inspector (from popup)
     onMessage("startInspector", (request) => {
       if (ctx.isInvalid) return;
 
@@ -120,11 +207,11 @@ export default defineContentScript({
           if (result) {
             await navigator.clipboard.writeText(result.content);
             await browser.storage.local.set({ lastVisualExtraction: result });
-            showToast(`Copied: ${result.title.substring(0, 30)}...`);
+            showToast(`Copied: ${result.title.substring(0, 30)}…`, "success");
           }
         } catch (err) {
           console.error("Extraction error:", err);
-          showToast("Failed to extract element.");
+          showToast("Failed to extract element.", "error");
         }
       };
 
@@ -143,7 +230,7 @@ export default defineContentScript({
       document.addEventListener("click", onClick, true);
       document.addEventListener("keydown", onKeyDown, true);
 
-      showToast("Visual Picker Active (ESC to cancel)");
+      showToast("Visual Picker Active — ESC to cancel", "loading", 0);
     });
 
     ctx.onInvalidated(() => {
